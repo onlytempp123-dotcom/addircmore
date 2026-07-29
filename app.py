@@ -16,6 +16,9 @@ import time
 import random
 import string
 import sys
+import os
+import threading
+from flask import Flask
 
 # ============================================================
 # CONFIG
@@ -26,11 +29,15 @@ NICK = "GamesHere"
 CHANNEL = "#chatwithworld"
 ADMIN = "Antonio"
 
+# HTTP keep-alive port for Render (Web Service free tier needs an open HTTP
+# port + inbound traffic, or it spins the process down after ~15 min idle).
+# This is separate from the IRC PORT above. Render sets $PORT automatically.
+HTTP_PORT = int(os.environ.get("PORT", 10000))
+
 RANK_DISPLAY_COUNT = 5
 LOBBY_TIME_DEFAULT = 30
-HIDING_TIME = 15
+HIDING_TIME = 40
 DUEL_REVEAL_DELAY = 2
-DUEL_TIMEOUT = 7
 PT_REVEAL_DELAY = 1.5  # non-blocking delay before Police & Thief roles are revealed
 
 WORD_POOL = [
@@ -543,7 +550,7 @@ def finalize_lobby(irc):
     hs_state["forced_seeker"] = None
     hs_state["players"].remove(seeker)
     hs_state["seeker"] = seeker
-    send_msg(irc, CHANNEL, f"👹 Assigned Seeker: **{seeker}**! 15s Hiding phase active. Hiders, PM the bot: !hide loc<1-15>")
+    send_msg(irc, CHANNEL, f"👹 Assigned Seeker: **{seeker}**! {HIDING_TIME}s Hiding phase active. Hiders, PM the bot: !hide loc<1-15>")
     hs_state["phase"] = "HIDING"
     hs_state["hiding_start"] = time.time()
 
@@ -709,10 +716,8 @@ def tick_hide_seek(irc, now):
             send_msg(irc, CHANNEL, f"👹 Seeker Tag: **!aaspas {duel['code']}** | 🏃 Hider Dodge: **!dhyapp {duel['code']}**")
             duel["revealed"] = True
             duel["duel_start"] = now
-        elif duel and duel.get("revealed") and now - duel["duel_start"] >= DUEL_TIMEOUT:
-            send_msg(irc, CHANNEL, "⏰ Duel Timeout! Stalemate... Search resumes.")
-            hs_state["phase"] = "SEEKING"
-            hs_state["duel"] = {}
+        # No timeout — the duel waits indefinitely until the Seeker or Hider
+        # types the correct command with the matching code.
 
 
 # ============================================================
@@ -1240,5 +1245,23 @@ def run_bot():
         time.sleep(5)
 
 
+# ============================================================
+# FLASK KEEP-ALIVE SERVER (for Render free Web Service tier)
+# ============================================================
+keepalive_app = Flask(__name__)
+
+
+@keepalive_app.route("/")
+def keepalive_root():
+    status = bot.current_game or "idle"
+    return f"GamesHere is alive. Current game: {status}", 200
+
+
+def run_flask():
+    keepalive_app.run(host="0.0.0.0", port=HTTP_PORT)
+
+
 if __name__ == "__main__":
-    run_bot()
+    irc_thread = threading.Thread(target=run_bot, daemon=True)
+    irc_thread.start()
+    run_flask()
